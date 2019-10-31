@@ -13,11 +13,14 @@ import java.util.Iterator;
 public class NioServer {
 
     public static void main(String[] args) {
+        Selector selector = null;
+        ServerSocketChannel serverSocketChannel = null;
+        ServerSocket serverSocket = null;
         try {
-            Selector selector = Selector.open();
-            ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
+            selector = Selector.open();
+            serverSocketChannel = ServerSocketChannel.open();
             serverSocketChannel.configureBlocking(false);
-            ServerSocket serverSocket = serverSocketChannel.socket();
+            serverSocket = serverSocketChannel.socket();
             serverSocket.bind(new InetSocketAddress("127.0.0.1", 28080));
             serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
             while (true) {
@@ -32,13 +35,21 @@ public class NioServer {
             }
         } catch (IOException e) {
             e.printStackTrace();
+        } finally {
+            try {
+                serverSocket.close();
+                serverSocketChannel.close();
+                selector.close();
+            } catch (IOException e1) {
+                e1.printStackTrace();
+            }
         }
     }
 
     private static void handle(SelectionKey selectionKey) {
         if (selectionKey.isAcceptable()) {
+            ServerSocketChannel serverSocketChannel = (ServerSocketChannel) selectionKey.channel();
             try {
-                ServerSocketChannel serverSocketChannel = (ServerSocketChannel) selectionKey.channel();
                 SocketChannel socketChannel = serverSocketChannel.accept();
                 socketChannel.configureBlocking(false);
                 socketChannel.register(selectionKey.selector(), SelectionKey.OP_READ);
@@ -48,25 +59,47 @@ public class NioServer {
         }
         if (selectionKey.isReadable()) {
             SocketChannel socketChannel = (SocketChannel) selectionKey.channel();
-            ByteBuffer byteBuffer = ByteBuffer.allocate(4);
+            handleRead(socketChannel, selectionKey);
+        }
+    }
+
+    private static void handleRead(SocketChannel socketChannel, SelectionKey selectionKey) {
+        if (socketChannel.isOpen() && socketChannel.isConnected()) {
+            ByteBuffer byteBuffer = ByteBuffer.allocate(10);
             try {
-                while (socketChannel.read(byteBuffer) > 0) {
-                    byteBuffer.flip();
-                    while (byteBuffer.hasRemaining()) {
-                        byte b = byteBuffer.get();
-                        System.out.println(b);
+                int status;
+                while (true) {
+                    if ((status = socketChannel.read(byteBuffer)) > 0) {
+                        byteBuffer.flip();
+                        while (byteBuffer.hasRemaining()) {
+                            byte b = byteBuffer.get();
+                            System.out.println(b);
+                        }
+                    } else {
+                        if (status == -1) {
+                            System.out.println("status:" + status);
+                            cancel(selectionKey);
+                            close(socketChannel);
+                        }
+                        break;
                     }
                 }
                 byteBuffer.clear();
             } catch (Exception e) {
                 e.printStackTrace();
-                selectionKey.cancel();
-                try {
-                    socketChannel.socket().close();
-                } catch (IOException e1) {
-                    e1.printStackTrace();
-                }
             }
         }
+    }
+
+    private static void close(SocketChannel socketChannel) {
+        try {
+            socketChannel.socket().close();
+        } catch (IOException e1) {
+            e1.printStackTrace();
+        }
+    }
+
+    private static void cancel(SelectionKey selectionKey) {
+        selectionKey.cancel();
     }
 }
